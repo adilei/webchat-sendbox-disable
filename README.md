@@ -9,33 +9,80 @@ When a bot sends suggested actions (quick reply buttons), you may want to:
 - **Keep suggestions clickable** - The buttons must still work
 - **Show visual feedback** - Indicate the input is disabled
 
-WebChat doesn't provide this out of the box. Simply setting `disabled` on the input element causes WebChat to also disable the suggestion buttons.
+WebChat doesn't provide this out of the box, and naive solutions have pitfalls:
+- Setting `input.disabled = true` causes WebChat to also disable the suggestion buttons
+- Targeting internal CSS classes like `webchat__send-box` is fragile (they can change between versions)
 
 ## The Solution
 
-This sample uses the **recompose pattern** to wrap `BasicSendBox` in a custom element, then:
+This sample uses the **recompose pattern** - WebChat's official approach for building custom UIs.
 
-1. **Detects suggestions** using the `useSuggestedActions()` hook
-2. **Blocks keyboard input** via event listeners (not `disabled` attribute)
-3. **Hides the cursor** with CSS `caret-color: transparent`
-4. **Blocks mouse clicks on input** with CSS `pointer-events: none`
-5. **Blurs the input** to remove focus when suggestions appear
+### What is Recomposing?
+
+Instead of using WebChat's default `<ReactWebChat>` component, we use its building blocks:
+
+```
+Composer                     ← Provides WebChat context (Direct Line, styles, etc.)
+  └── AccessKeySinkSurface   ← Handles keyboard shortcuts
+        └── BasicToaster     ← Shows notifications
+        └── BasicTranscript  ← Displays message history
+        └── BasicSendBox     ← Input field + suggested actions
+```
+
+By composing these ourselves, we can **wrap any component** with our own elements and logic.
+
+### Our Approach
+
+We wrap `BasicSendBox` in our own `<div>` and control its state:
 
 ```javascript
-// Key technique: wrap BasicSendBox, detect suggestions, conditionally disable
 function RecomposedChat() {
+  // Hook tells us when suggestions are present
   var suggestedActions = useSuggestedActions()[0];
   var hasSuggestions = suggestedActions && suggestedActions.length > 0;
 
-  // ... event listeners to block keyboard input ...
-
   return createElement('div', {
+    // Our own class - we control this, not WebChat internals
     className: hasSuggestions ? 'sendbox-wrapper--disabled' : ''
   },
-    createElement(BasicSendBox, null)
+    createElement(BasicSendBox, null)  // WebChat's component, unchanged
   );
 }
 ```
+
+Then CSS targets the input using a **stable public attribute** (not internal classes):
+
+```css
+/* data-id is a public, stable attribute - safe to use */
+.sendbox-wrapper--disabled [data-id="webchat-sendbox-input"] {
+  opacity: 0.5;
+  caret-color: transparent;  /* Hide cursor */
+  pointer-events: none;      /* Block mouse clicks */
+}
+```
+
+And JavaScript blocks keyboard input (CSS `pointer-events` doesn't block keyboard):
+
+```javascript
+useEffect(function() {
+  if (hasSuggestions) {
+    input.addEventListener('keydown', blockInput, true);
+    input.blur();  // Remove focus to hide cursor
+  }
+  return function() {
+    input.removeEventListener('keydown', blockInput, true);
+  };
+}, [hasSuggestions]);
+```
+
+### Why This Approach?
+
+| Approach | Problem |
+|----------|---------|
+| `input.disabled = true` | WebChat propagates disabled state to suggestion buttons |
+| Target `.webchat__send-box` | Internal class names can change between versions |
+| CSS `pointer-events: none` on wrapper | Blocks suggestions too |
+| **Our approach: wrap + data-id** | ✅ Stable, suggestions stay clickable |
 
 ## Demo Flow
 
@@ -71,6 +118,11 @@ This sample uses a **mock Direct Line** for demonstration. Replace it with a rea
 var directLine = window.WebChat.createDirectLine({
   token: 'YOUR_DIRECT_LINE_TOKEN'
 });
+
+// Then pass to Composer:
+createElement(Composer, { directLine: directLine, styleOptions: styleOptions },
+  createElement(RecomposedChat)
+);
 ```
 
 Get a token from your bot's Direct Line channel in Azure Portal, or use a token server.
@@ -78,50 +130,42 @@ Get a token from your bot's Direct Line channel in Azure Portal, or use a token 
 ### Option 2: Copilot Studio
 
 For Microsoft Copilot Studio bots, you can:
-- Use the token endpoint from Copilot Studio
-- Or use the [M365 Agents SDK](https://github.com/AhmedBelkadi/M365AgentsSDK-Streaming-WebChat) for streaming support
+- Use the token endpoint from Copilot Studio's "Channels" settings
+- Or use the [M365 Agents SDK](https://www.npmjs.com/package/@anthropic/m365-agents-sdk) for streaming support
 
-## Key Concepts
+## WebChat Recompose Reference
 
-### Recompose Pattern
-
-WebChat's recompose pattern lets you build custom UIs using Basic* components:
-
-```
-Composer (provides WebChat context)
-  └── AccessKeySinkSurface (keyboard navigation)
-        └── BasicToaster (notifications)
-        └── BasicTranscript (message list)
-        └── BasicConnectivityStatus (connection status)
-        └── BasicSendBox (input + suggestions)
-```
-
-See [official WebChat recompose samples](https://github.com/microsoft/BotFramework-WebChat/tree/main/samples/06.recomposing-ui).
-
-### Why Not Just Disable the Input?
-
-Setting `input.disabled = true` causes WebChat to propagate the disabled state to suggestion buttons. This sample avoids that by:
-
-- Using CSS `pointer-events: none` on the input only
-- Blocking keyboard events via JavaScript event listeners
-- Never setting the `disabled` attribute
-
-### Suggested Actions Format
-
-Suggested actions are sent via the `suggestedActions` property on bot activities:
+### Available Components
 
 ```javascript
-{
-  type: 'message',
-  text: 'Choose an option:',
-  suggestedActions: {
-    actions: [
-      { type: 'imBack', title: 'Option 1', value: 'option1' },
-      { type: 'imBack', title: 'Option 2', value: 'option2' }
-    ]
-  }
-}
+var Components = window.WebChat.Components;
+
+// Core layout
+Components.Composer              // Context provider (required)
+Components.AccessKeySinkSurface  // Keyboard navigation
+
+// UI building blocks
+Components.BasicToaster          // Notifications
+Components.BasicTranscript       // Message list
+Components.BasicConnectivityStatus  // Connection status
+Components.BasicSendBox          // Input + suggestions
 ```
+
+### Available Hooks
+
+```javascript
+var hooks = window.WebChat.hooks;
+
+hooks.useSuggestedActions()  // Get current suggested actions
+hooks.useActivities()        // Get all activities
+hooks.useSendMessage()       // Send a message
+hooks.usePostActivity()      // Post any activity
+// ... many more
+```
+
+### Official Samples
+
+See [WebChat recompose samples](https://github.com/microsoft/BotFramework-WebChat/tree/main/samples/06.recomposing-ui) for more examples.
 
 ## Files
 
