@@ -44,6 +44,23 @@ test('Clicking suggestion keeps sendbox disabled for next suggestions', async ({
   expect(isDisabled).toBe(true);
 });
 
+test('Input is blurred when suggestions shown (no cursor)', async ({ page }) => {
+  await page.goto('http://localhost:5174');
+  await page.waitForTimeout(2000);
+
+  // Focus the input and type
+  const input = page.locator('[data-id="webchat-sendbox-input"]');
+  await input.fill('hi');
+  await input.press('Enter');
+
+  const suggestedActions = page.getByLabel('Suggested actions');
+  await suggestedActions.getByRole('button', { name: 'Food' }).waitFor({ state: 'visible', timeout: 10000 });
+
+  // Input should not be focused (cursor should not be visible)
+  const isFocused = await input.evaluate(el => document.activeElement === el);
+  expect(isFocused).toBe(false);
+});
+
 test('Input blocks typing when suggestions shown', async ({ page }) => {
   await page.goto('http://localhost:5174');
   await page.waitForTimeout(2000);
