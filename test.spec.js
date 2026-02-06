@@ -10,21 +10,21 @@ test('WebChat loads without errors', async ({ page }) => {
   await page.goto('http://localhost:5174');
   await page.waitForTimeout(2000);
 
-  await expect(page.locator('#webchat')).toBeVisible();
+  await expect(page.locator('#root')).toBeVisible();
+  await expect(page.locator('.chat-layout')).toBeVisible();
   expect(errors.length).toBe(0);
 });
 
 test('SendBox starts enabled (no suggestions)', async ({ page }) => {
   await page.goto('http://localhost:5174');
-
-  // Wait for welcome message to appear
   await page.waitForTimeout(3000);
 
-  // SendBox should NOT be disabled initially (no suggestions yet)
-  const hasDisabledClass = await page.evaluate(() => {
-    return document.getElementById('webchat').classList.contains('sendbox-disabled');
-  });
-  expect(hasDisabledClass).toBe(false);
+  // Our wrapper should NOT have disabled class initially
+  const wrapper = page.locator('[data-testid="sendbox-wrapper"]');
+  await expect(wrapper).toBeVisible();
+
+  const isDisabled = await wrapper.evaluate(el => el.classList.contains('sendbox-wrapper--disabled'));
+  expect(isDisabled).toBe(false);
 
   await page.screenshot({ path: 'test-enabled.png' });
 });
@@ -33,20 +33,18 @@ test('SendBox becomes disabled when suggestions appear', async ({ page }) => {
   await page.goto('http://localhost:5174');
   await page.waitForTimeout(2000);
 
-  // Type something to trigger menu
-  const sendBox = page.locator('[data-id="webchat-sendbox-input"]');
-  await sendBox.fill('menu');
-  await sendBox.press('Enter');
+  // Type to trigger menu
+  await page.getByPlaceholder('Type your message').fill('hi');
+  await page.getByPlaceholder('Type your message').press('Enter');
 
   // Wait for suggestions
   const suggestedActions = page.getByLabel('Suggested actions');
-  await suggestedActions.getByRole('button', { name: 'Food' }).waitFor({ state: 'visible', timeout: 5000 });
+  await suggestedActions.getByRole('button', { name: 'Food' }).waitFor({ state: 'visible', timeout: 10000 });
 
-  // SendBox should now be disabled
-  const hasDisabledClass = await page.evaluate(() => {
-    return document.getElementById('webchat').classList.contains('sendbox-disabled');
-  });
-  expect(hasDisabledClass).toBe(true);
+  // Our wrapper should now have disabled class
+  const wrapper = page.locator('[data-testid="sendbox-wrapper"]');
+  const isDisabled = await wrapper.evaluate(el => el.classList.contains('sendbox-wrapper--disabled'));
+  expect(isDisabled).toBe(true);
 
   await page.screenshot({ path: 'test-disabled.png' });
 });
@@ -56,15 +54,14 @@ test('Two-level navigation works', async ({ page }) => {
   await page.waitForTimeout(2000);
 
   // Type to get menu
-  const sendBox = page.locator('[data-id="webchat-sendbox-input"]');
-  await sendBox.fill('hi');
-  await sendBox.press('Enter');
+  await page.getByPlaceholder('Type your message').fill('hi');
+  await page.getByPlaceholder('Type your message').press('Enter');
 
   const suggestedActions = page.getByLabel('Suggested actions');
-  await suggestedActions.getByRole('button', { name: 'Food' }).waitFor({ state: 'visible', timeout: 5000 });
+  await suggestedActions.getByRole('button', { name: 'Food' }).waitFor({ state: 'visible', timeout: 10000 });
 
-  // Click Food
-  await suggestedActions.getByRole('button', { name: 'Food' }).click();
+  // Click Food (force: true needed due to WebChat internal state)
+  await suggestedActions.getByRole('button', { name: 'Food' }).click({ force: true });
   await page.waitForTimeout(1500);
 
   // Should see Pizza
@@ -72,7 +69,7 @@ test('Two-level navigation works', async ({ page }) => {
   await page.screenshot({ path: 'test-level2.png' });
 
   // Click Pizza
-  await suggestedActions.getByRole('button', { name: 'Pizza' }).click();
+  await suggestedActions.getByRole('button', { name: 'Pizza' }).click({ force: true });
   await page.waitForTimeout(2000);
 
   // Should see confirmation

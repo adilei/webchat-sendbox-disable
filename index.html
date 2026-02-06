@@ -3,65 +3,74 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebChat - Disable SendBox with Suggestions</title>
+  <title>WebChat - Disable SendBox with Suggestions (Recompose)</title>
   <style>
-    * {
-      box-sizing: border-box;
-    }
-
+    * { box-sizing: border-box; }
     html, body {
       height: 100%;
       margin: 0;
-      padding: 0;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: #f0f2f5;
     }
-
-    #webchat {
+    #root {
       height: 100%;
-      width: 100%;
       max-width: 480px;
       margin: 0 auto;
       box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     }
 
-    /* Disable sendbox when suggestions are shown */
-    #webchat.sendbox-disabled [class*="send-box"] input,
-    #webchat.sendbox-disabled [class*="send-box"] textarea {
-      pointer-events: none !important;
-      opacity: 0.5 !important;
+    /* Layout for our recomposed chat */
+    .chat-layout {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      background: #fff;
+    }
+    .chat-layout__transcript {
+      flex: 1;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
     }
 
-    #webchat.sendbox-disabled [class*="send-box"] button[type="submit"],
-    #webchat.sendbox-disabled [class*="send-box__button"] {
-      pointer-events: none !important;
-      opacity: 0.3 !important;
+    /* Our SendBox wrapper - we control this element */
+    .sendbox-wrapper {
+      position: relative;
     }
-
-    /* Hint text when disabled */
-    #webchat.sendbox-disabled::after {
-      content: 'Please select an option above';
-      display: block;
-      text-align: center;
-      padding: 6px;
-      color: #666;
-      font-size: 11px;
-      background: #f5f5f5;
-      border-top: 1px solid #e0e0e0;
+    /* Visual hint when input is disabled */
+    .sendbox-wrapper--disabled [data-id="webchat-sendbox-input"] {
+      opacity: 0.5;
     }
   </style>
 </head>
 <body>
-  <div id="webchat"></div>
+  <div id="root"></div>
 
-  <!-- RxJS for mock DirectLine -->
   <script src="https://unpkg.com/rxjs@7/dist/bundles/rxjs.umd.min.js"></script>
-  <!-- WebChat -->
+  <script crossorigin="anonymous" src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin="anonymous" src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://cdn.botframework.com/botframework-webchat/latest/webchat.js"></script>
 
   <script>
     (function() {
       'use strict';
+
+      var React = window.React;
+      var ReactDOM = window.ReactDOM;
+      var createElement = React.createElement;
+
+      // WebChat exports - following official recompose pattern
+      var Components = window.WebChat.Components;
+      var Composer = Components.Composer;
+      var AccessKeySinkSurface = Components.AccessKeySinkSurface;
+      var BasicToaster = Components.BasicToaster;
+      var BasicTranscript = Components.BasicTranscript;
+      var BasicConnectivityStatus = Components.BasicConnectivityStatus;
+      var BasicSendBox = Components.BasicSendBox;
+      var useSuggestedActions = window.WebChat.hooks.useSuggestedActions;
+      var useEffect = React.useEffect;
+      var useRef = React.useRef;
 
       // =====================
       // MOCK DIRECTLINE
@@ -76,7 +85,6 @@
         var counter = 0;
         var handlers = [];
 
-        // Simulate connection
         setTimeout(function() { connectionStatus.next(1); }, 50);
         setTimeout(function() { connectionStatus.next(2); }, 100);
 
@@ -90,24 +98,17 @@
               obs.complete();
             });
           },
-
           postActivity: function(activity) {
             return new Observable(function(obs) {
               var id = 'user-' + (++counter);
               setTimeout(function() {
-                // Don't echo user message - WebChat handles display
-                // Just notify handlers and complete
                 handlers.forEach(function(h) { h(activity); });
                 obs.next(id);
                 obs.complete();
               }, 10);
             });
           },
-
-          onUserMessage: function(handler) {
-            handlers.push(handler);
-          },
-
+          onUserMessage: function(handler) { handlers.push(handler); },
           sendBotMessage: function(text, suggestions) {
             var activity = {
               id: 'bot-' + (++counter),
@@ -125,7 +126,6 @@
             }
             activitySubject.next(activity);
           },
-
           sendTyping: function() {
             activitySubject.next({
               id: 'typing-' + (++counter),
@@ -148,33 +148,24 @@
         ];
 
         var subMenus = {
-          food: {
-            text: 'What would you like to eat?',
-            options: [
-              { title: 'Pizza', value: 'pizza' },
-              { title: 'Burger', value: 'burger' },
-              { title: 'Sushi', value: 'sushi' },
-              { title: 'Back', value: 'back' }
-            ]
-          },
-          entertainment: {
-            text: 'What kind of entertainment?',
-            options: [
-              { title: 'Movies', value: 'movies' },
-              { title: 'Music', value: 'music' },
-              { title: 'Games', value: 'games' },
-              { title: 'Back', value: 'back' }
-            ]
-          },
-          help: {
-            text: 'What do you need help with?',
-            options: [
-              { title: 'Account', value: 'account' },
-              { title: 'Orders', value: 'orders' },
-              { title: 'Contact', value: 'contact' },
-              { title: 'Back', value: 'back' }
-            ]
-          }
+          food: { text: 'What would you like to eat?', options: [
+            { title: 'Pizza', value: 'pizza' },
+            { title: 'Burger', value: 'burger' },
+            { title: 'Sushi', value: 'sushi' },
+            { title: 'Back', value: 'back' }
+          ]},
+          entertainment: { text: 'What kind of entertainment?', options: [
+            { title: 'Movies', value: 'movies' },
+            { title: 'Music', value: 'music' },
+            { title: 'Games', value: 'games' },
+            { title: 'Back', value: 'back' }
+          ]},
+          help: { text: 'What do you need help with?', options: [
+            { title: 'Account', value: 'account' },
+            { title: 'Orders', value: 'orders' },
+            { title: 'Contact', value: 'contact' },
+            { title: 'Back', value: 'back' }
+          ]}
         };
 
         var responses = {
@@ -195,18 +186,15 @@
 
           setTimeout(function() {
             dl.sendTyping();
-
             setTimeout(function() {
               if (input === 'back') {
                 dl.sendBotMessage('What would you like to do?', mainMenu);
                 return;
               }
-
               if (subMenus[input]) {
                 dl.sendBotMessage(subMenus[input].text, subMenus[input].options);
                 return;
               }
-
               if (responses[input]) {
                 dl.sendBotMessage(responses[input], null);
                 setTimeout(function() {
@@ -214,128 +202,115 @@
                 }, 1500);
                 return;
               }
-
-              dl.sendBotMessage('Here are your options (notice: typing is now disabled):', mainMenu);
+              dl.sendBotMessage('Here are your options:', mainMenu);
             }, 600);
           }, 200);
         });
 
-        // Welcome message - start WITHOUT suggestions to show enabled state
         setTimeout(function() {
-          dl.sendBotMessage('Hi! I\'m your assistant. Type "menu" or anything to see options.', null);
+          dl.sendBotMessage('Hi! Type anything to see the menu.', null);
         }, 400);
       }
 
       // =====================
-      // STORE MIDDLEWARE
+      // RECOMPOSED CHAT UI
       // =====================
-      function createStoreWithDisable() {
-        var webchatEl = document.getElementById('webchat');
+      // Following official pattern: Composer > AccessKeySinkSurface > Basic* components
+      // We wrap BasicSendBox in our own div to control disabled state
+      function RecomposedChat() {
+        var result = useSuggestedActions();
+        var suggestedActions = result[0];
+        var hasSuggestions = suggestedActions && suggestedActions.length > 0;
+        var wrapperRef = useRef(null);
 
-        function setDisabled(disabled) {
-          console.log('SendBox disabled:', disabled);
-          if (disabled) {
-            webchatEl.classList.add('sendbox-disabled');
-          } else {
-            webchatEl.classList.remove('sendbox-disabled');
+        // Block input when suggestions are present (without using disabled which WebChat propagates)
+        useEffect(function() {
+          if (!wrapperRef.current) return;
+          var input = wrapperRef.current.querySelector('[data-id="webchat-sendbox-input"]');
+          if (!input) return;
+
+          function blockInput(e) {
+            if (hasSuggestions) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
           }
 
-          // Actually disable the input element (CSS alone doesn't block keyboard)
-          // Use setTimeout to ensure WebChat has rendered
-          setTimeout(function() {
-            var input = webchatEl.querySelector('[data-id="webchat-sendbox-input"]');
-            if (input) {
-              input.disabled = disabled;
-              if (disabled) {
-                input.setAttribute('readonly', 'readonly');
-                input.blur();
-              } else {
-                input.removeAttribute('readonly');
-              }
+          if (hasSuggestions) {
+            input.addEventListener('keydown', blockInput, true);
+            input.addEventListener('keypress', blockInput, true);
+            input.addEventListener('paste', blockInput, true);
+            // Clear any existing value when suggestions appear
+            if (input.value) {
+              // Dispatch input event to sync React state
+              var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+              nativeInputValueSetter.call(input, '');
+              input.dispatchEvent(new Event('input', { bubbles: true }));
             }
-          }, 50);
-        }
+          }
 
-        return window.WebChat.createStore({}, function(store) {
-          return function(next) {
-            return function(action) {
-              // Log all actions for debugging
-              if (action.type.indexOf('DIRECT_LINE') === 0 || action.type.indexOf('WEB_CHAT') === 0) {
-                console.log('Action:', action.type);
-              }
-
-              // Bot message with suggestions -> disable sendbox
-              if (action.type === 'DIRECT_LINE/INCOMING_ACTIVITY') {
-                var activity = action.payload.activity;
-                if (activity.type === 'message' && activity.from && activity.from.role === 'bot') {
-                  var hasSuggestions = !!(activity.suggestedActions &&
-                                          activity.suggestedActions.actions &&
-                                          activity.suggestedActions.actions.length > 0);
-                  setDisabled(hasSuggestions);
-                }
-              }
-
-              // User posts activity -> enable sendbox
-              if (action.type === 'DIRECT_LINE/POST_ACTIVITY') {
-                setDisabled(false);
-              }
-
-              return next(action);
-            };
+          return function() {
+            input.removeEventListener('keydown', blockInput, true);
+            input.removeEventListener('keypress', blockInput, true);
+            input.removeEventListener('paste', blockInput, true);
           };
-        });
+        }, [hasSuggestions]);
+
+        var wrapperClass = 'sendbox-wrapper' + (hasSuggestions ? ' sendbox-wrapper--disabled' : '');
+
+        return createElement(AccessKeySinkSurface, null,
+          createElement('div', { className: 'chat-layout' },
+            createElement(BasicToaster, null),
+            createElement('div', { className: 'chat-layout__transcript' },
+              createElement(BasicTranscript, null)
+            ),
+            createElement(BasicConnectivityStatus, null),
+            // Our wrapper around BasicSendBox
+            createElement('div', {
+              ref: wrapperRef,
+              className: wrapperClass,
+              'data-testid': 'sendbox-wrapper',
+              'aria-disabled': hasSuggestions
+            },
+              createElement(BasicSendBox, null)
+            )
+          )
+        );
       }
 
       // =====================
       // INIT
       // =====================
-      (function() {
-        var directLine = createMockDirectLine();
-        setupFlow(directLine);
+      var directLine = createMockDirectLine();
+      setupFlow(directLine);
 
-        var store = createStoreWithDisable();
+      var styleOptions = {
+        bubbleBackground: '#e8f4fd',
+        bubbleTextColor: '#1a1a1a',
+        bubbleBorderRadius: 12,
+        bubbleFromUserBackground: '#0078d4',
+        bubbleFromUserTextColor: '#ffffff',
+        bubbleFromUserBorderRadius: 12,
+        suggestedActionLayout: 'stacked',
+        suggestedActionBackgroundColor: '#0078d4',
+        suggestedActionBorderColor: 'transparent',
+        suggestedActionBorderRadius: 16,
+        suggestedActionTextColor: '#ffffff',
+        suggestedActionHeight: 40,
+        hideUploadButton: true
+      };
 
-        var styleOptions = {
-          backgroundColor: '#ffffff',
-
-          // Chat bubbles
-          bubbleBackground: '#e8f4fd',
-          bubbleTextColor: '#1a1a1a',
-          bubbleBorderRadius: 12,
-          bubbleFromUserBackground: '#0078d4',
-          bubbleFromUserTextColor: '#ffffff',
-          bubbleFromUserBorderRadius: 12,
-
-          // Suggested actions - make them clearly visible
-          suggestedActionLayout: 'stacked',
-          suggestedActionBackgroundColor: '#0078d4',
-          suggestedActionBorderColor: 'transparent',
-          suggestedActionBorderRadius: 16,
-          suggestedActionBorderWidth: 0,
-          suggestedActionTextColor: '#ffffff',
-          suggestedActionHeight: 40,
-          suggestedActionImageHeight: 20,
-
-          // Send box
-          sendBoxBackground: '#ffffff',
-          sendBoxBorderTop: '1px solid #e0e0e0',
-          sendBoxTextColor: '#333333',
-          sendBoxPlaceholderColor: '#999999',
-          sendBoxButtonColor: '#0078d4',
-
-          hideUploadButton: true,
-          rootHeight: '100%',
-          rootWidth: '100%'
-        };
-
-        window.WebChat.renderWebChat({
+      var root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(
+        createElement(Composer, {
           directLine: directLine,
-          store: store,
           styleOptions: styleOptions
-        }, document.getElementById('webchat'));
+        },
+          createElement(RecomposedChat)
+        )
+      );
 
-        console.log('WebChat initialized');
-      })();
+      console.log('WebChat initialized with recomposed UI (official pattern)');
     })();
   </script>
 </body>
