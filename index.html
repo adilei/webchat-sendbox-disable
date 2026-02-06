@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebChat - Disable SendBox with Suggestions</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f0f2f5;
+    }
+
+    #webchat {
+      height: 100%;
+      width: 100%;
+      max-width: 480px;
+      margin: 0 auto;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+
+    /* Disable sendbox when suggestions are shown */
+    #webchat.sendbox-disabled [class*="send-box"] input,
+    #webchat.sendbox-disabled [class*="send-box"] textarea {
+      pointer-events: none !important;
+      opacity: 0.5 !important;
+    }
+
+    #webchat.sendbox-disabled [class*="send-box"] button[type="submit"],
+    #webchat.sendbox-disabled [class*="send-box__button"] {
+      pointer-events: none !important;
+      opacity: 0.3 !important;
+    }
+
+    /* Hint text when disabled */
+    #webchat.sendbox-disabled::after {
+      content: 'Please select an option above';
+      display: block;
+      text-align: center;
+      padding: 6px;
+      color: #666;
+      font-size: 11px;
+      background: #f5f5f5;
+      border-top: 1px solid #e0e0e0;
+    }
+  </style>
+</head>
+<body>
+  <div id="webchat"></div>
+
+  <!-- RxJS for mock DirectLine -->
+  <script src="https://unpkg.com/rxjs@7/dist/bundles/rxjs.umd.min.js"></script>
+  <!-- WebChat -->
+  <script src="https://cdn.botframework.com/botframework-webchat/latest/webchat.js"></script>
+
+  <script>
+    (function() {
+      'use strict';
+
+      // =====================
+      // MOCK DIRECTLINE
+      // =====================
+      function createMockDirectLine() {
+        var Subject = rxjs.Subject;
+        var BehaviorSubject = rxjs.BehaviorSubject;
+        var Observable = rxjs.Observable;
+
+        var activitySubject = new Subject();
+        var connectionStatus = new BehaviorSubject(0);
+        var counter = 0;
+        var handlers = [];
+
+        // Simulate connection
+        setTimeout(function() { connectionStatus.next(1); }, 50);
+        setTimeout(function() { connectionStatus.next(2); }, 100);
+
+        return {
+          activity$: activitySubject.asObservable(),
+          connectionStatus$: connectionStatus.asObservable(),
+          end: function() {},
+          getSessionId: function() {
+            return new Observable(function(obs) {
+              obs.next('session-' + Date.now());
+              obs.complete();
+            });
+          },
+
+          postActivity: function(activity) {
+            return new Observable(function(obs) {
+              var id = 'user-' + (++counter);
+              setTimeout(function() {
+                // Don't echo user message - WebChat handles display
+                // Just notify handlers and complete
+                handlers.forEach(function(h) { h(activity); });
+                obs.next(id);
+                obs.complete();
+              }, 10);
+            });
+          },
+
+          onUserMessage: function(handler) {
+            handlers.push(handler);
+          },
+
+          sendBotMessage: function(text, suggestions) {
+            var activity = {
+              id: 'bot-' + (++counter),
+              type: 'message',
+              timestamp: new Date().toISOString(),
+              from: { id: 'bot', role: 'bot' },
+              text: text
+            };
+            if (suggestions && suggestions.length) {
+              activity.suggestedActions = {
+                actions: suggestions.map(function(s) {
+                  return { type: 'imBack', title: s.title, value: s.value || s.title };
+                })
+              };
+            }
+            activitySubject.next(activity);
+          },
+
+          sendTyping: function() {
+            activitySubject.next({
+              id: 'typing-' + (++counter),
+              type: 'typing',
+              timestamp: new Date().toISOString(),
+              from: { id: 'bot', role: 'bot' }
+            });
+          }
+        };
+      }
+
+      // =====================
+      // CONVERSATION FLOW
+      // =====================
+      function setupFlow(dl) {
+        var mainMenu = [
+          { title: 'Food', value: 'food' },
+          { title: 'Entertainment', value: 'entertainment' },
+          { title: 'Help', value: 'help' }
+        ];
+
+        var subMenus = {
+          food: {
+            text: 'What would you like to eat?',
+            options: [
+              { title: 'Pizza', value: 'pizza' },
+              { title: 'Burger', value: 'burger' },
+              { title: 'Sushi', value: 'sushi' },
+              { title: 'Back', value: 'back' }
+            ]
+          },
+          entertainment: {
+            text: 'What kind of entertainment?',
+            options: [
+              { title: 'Movies', value: 'movies' },
+              { title: 'Music', value: 'music' },
+              { title: 'Games', value: 'games' },
+              { title: 'Back', value: 'back' }
+            ]
+          },
+          help: {
+            text: 'What do you need help with?',
+            options: [
+              { title: 'Account', value: 'account' },
+              { title: 'Orders', value: 'orders' },
+              { title: 'Contact', value: 'contact' },
+              { title: 'Back', value: 'back' }
+            ]
+          }
+        };
+
+        var responses = {
+          pizza: 'Your pizza is on the way! ETA: 30 min.',
+          burger: 'Burger order confirmed! ETA: 25 min.',
+          sushi: 'Fresh sushi coming up! ETA: 40 min.',
+          movies: 'Top picks: Inception, The Matrix, Interstellar.',
+          music: 'Playing your favorites now!',
+          games: 'Game on! Choose: Chess, Trivia, or Puzzles.',
+          account: 'Your account is active. Email: user@example.com',
+          orders: 'You have 2 pending orders.',
+          contact: 'Support contacted. Response within 24h.'
+        };
+
+        dl.onUserMessage(function(activity) {
+          if (!activity.text) return;
+          var input = activity.text.toLowerCase().trim();
+
+          setTimeout(function() {
+            dl.sendTyping();
+
+            setTimeout(function() {
+              if (input === 'back') {
+                dl.sendBotMessage('What would you like to do?', mainMenu);
+                return;
+              }
+
+              if (subMenus[input]) {
+                dl.sendBotMessage(subMenus[input].text, subMenus[input].options);
+                return;
+              }
+
+              if (responses[input]) {
+                dl.sendBotMessage(responses[input], null);
+                setTimeout(function() {
+                  dl.sendBotMessage('Anything else?', mainMenu);
+                }, 1500);
+                return;
+              }
+
+              dl.sendBotMessage('Here are your options (notice: typing is now disabled):', mainMenu);
+            }, 600);
+          }, 200);
+        });
+
+        // Welcome message - start WITHOUT suggestions to show enabled state
+        setTimeout(function() {
+          dl.sendBotMessage('Hi! I\'m your assistant. Type "menu" or anything to see options.', null);
+        }, 400);
+      }
+
+      // =====================
+      // STORE MIDDLEWARE
+      // =====================
+      function createStoreWithDisable() {
+        var webchatEl = document.getElementById('webchat');
+
+        function setDisabled(disabled) {
+          console.log('SendBox disabled:', disabled);
+          if (disabled) {
+            webchatEl.classList.add('sendbox-disabled');
+          } else {
+            webchatEl.classList.remove('sendbox-disabled');
+          }
+        }
+
+        return window.WebChat.createStore({}, function(store) {
+          return function(next) {
+            return function(action) {
+              // Log all actions for debugging
+              if (action.type.indexOf('DIRECT_LINE') === 0 || action.type.indexOf('WEB_CHAT') === 0) {
+                console.log('Action:', action.type);
+              }
+
+              // Bot message with suggestions -> disable sendbox
+              if (action.type === 'DIRECT_LINE/INCOMING_ACTIVITY') {
+                var activity = action.payload.activity;
+                if (activity.type === 'message' && activity.from && activity.from.role === 'bot') {
+                  var hasSuggestions = !!(activity.suggestedActions &&
+                                          activity.suggestedActions.actions &&
+                                          activity.suggestedActions.actions.length > 0);
+                  setDisabled(hasSuggestions);
+                }
+              }
+
+              // User posts activity -> enable sendbox
+              if (action.type === 'DIRECT_LINE/POST_ACTIVITY') {
+                setDisabled(false);
+              }
+
+              return next(action);
+            };
+          };
+        });
+      }
+
+      // =====================
+      // INIT
+      // =====================
+      (function() {
+        var directLine = createMockDirectLine();
+        setupFlow(directLine);
+
+        var store = createStoreWithDisable();
+
+        var styleOptions = {
+          backgroundColor: '#ffffff',
+
+          // Chat bubbles
+          bubbleBackground: '#e8f4fd',
+          bubbleTextColor: '#1a1a1a',
+          bubbleBorderRadius: 12,
+          bubbleFromUserBackground: '#0078d4',
+          bubbleFromUserTextColor: '#ffffff',
+          bubbleFromUserBorderRadius: 12,
+
+          // Suggested actions - make them clearly visible
+          suggestedActionLayout: 'stacked',
+          suggestedActionBackgroundColor: '#0078d4',
+          suggestedActionBorderColor: 'transparent',
+          suggestedActionBorderRadius: 16,
+          suggestedActionBorderWidth: 0,
+          suggestedActionTextColor: '#ffffff',
+          suggestedActionHeight: 40,
+          suggestedActionImageHeight: 20,
+
+          // Send box
+          sendBoxBackground: '#ffffff',
+          sendBoxBorderTop: '1px solid #e0e0e0',
+          sendBoxTextColor: '#333333',
+          sendBoxPlaceholderColor: '#999999',
+          sendBoxButtonColor: '#0078d4',
+
+          hideUploadButton: true,
+          rootHeight: '100%',
+          rootWidth: '100%'
+        };
+
+        window.WebChat.renderWebChat({
+          directLine: directLine,
+          store: store,
+          styleOptions: styleOptions
+        }, document.getElementById('webchat'));
+
+        console.log('WebChat initialized');
+      })();
+    })();
+  </script>
+</body>
+</html>
