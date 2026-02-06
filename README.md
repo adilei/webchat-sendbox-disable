@@ -1,79 +1,135 @@
-# WebChat SendBox Disable Sample
+# WebChat: Disable SendBox When Suggestions Are Shown
 
-A static HTML demo showing how to disable the WebChat sendbox when suggested actions are present, forcing users to select from options rather than type.
+A sample demonstrating how to disable the text input in BotFramework WebChat when suggested actions are displayed, forcing users to select from the options rather than type free-form text.
 
-## Features
+## The Problem
 
-- **Mock DirectLine** - No real bot needed, all responses simulated
-- **Shows enabled/disabled states** - Starts with typing enabled, then disables when suggestions appear
-- **Two-level navigation** - Main menu → Sub-options → Final response
-- **Single HTML file** - No build tools required
+When a bot sends suggested actions (quick reply buttons), you may want to:
+- **Disable free-form typing** - Force users to click a suggestion
+- **Keep suggestions clickable** - The buttons must still work
+- **Show visual feedback** - Indicate the input is disabled
 
-## Demo Flow
+WebChat doesn't provide this out of the box. Simply setting `disabled` on the input element causes WebChat to also disable the suggestion buttons.
 
-1. Bot welcomes user with no suggestions → **Sendbox enabled** (user can type)
-2. User types anything → Bot shows menu with suggestions → **Sendbox disabled**
-3. User clicks option → Sub-menu appears → **Sendbox still disabled**
-4. User makes final selection → Response without suggestions → **Sendbox briefly enabled**
-5. Bot shows menu again → **Sendbox disabled**
+## The Solution
 
-## How It Works
+This sample uses the **recompose pattern** to wrap `BasicSendBox` in a custom element, then:
 
-Uses WebChat's `createStore` middleware to intercept activities:
+1. **Detects suggestions** using the `useSuggestedActions()` hook
+2. **Blocks keyboard input** via event listeners (not `disabled` attribute)
+3. **Hides the cursor** with CSS `caret-color: transparent`
+4. **Blocks mouse clicks on input** with CSS `pointer-events: none`
+5. **Blurs the input** to remove focus when suggestions appear
 
 ```javascript
-WebChat.createStore({}, function(store) {
-  return function(next) {
-    return function(action) {
-      if (action.type === 'DIRECT_LINE/INCOMING_ACTIVITY') {
-        var activity = action.payload.activity;
-        if (activity.suggestedActions?.actions?.length > 0) {
-          // Add CSS class to disable sendbox
-          webchatEl.classList.add('sendbox-disabled');
-        } else {
-          webchatEl.classList.remove('sendbox-disabled');
-        }
-      }
-      return next(action);
-    };
-  };
-});
-```
+// Key technique: wrap BasicSendBox, detect suggestions, conditionally disable
+function RecomposedChat() {
+  var suggestedActions = useSuggestedActions()[0];
+  var hasSuggestions = suggestedActions && suggestedActions.length > 0;
 
-CSS disables input via pointer-events and opacity:
+  // ... event listeners to block keyboard input ...
 
-```css
-#webchat.sendbox-disabled [class*="send-box"] input {
-  pointer-events: none !important;
-  opacity: 0.5 !important;
+  return createElement('div', {
+    className: hasSuggestions ? 'sendbox-wrapper--disabled' : ''
+  },
+    createElement(BasicSendBox, null)
+  );
 }
 ```
 
-## Usage
+## Demo Flow
+
+1. Bot welcomes user (no suggestions) → **SendBox enabled** (user can type)
+2. User types anything → Bot shows menu → **SendBox disabled** (must click)
+3. User clicks option → Sub-menu appears → **SendBox still disabled**
+4. User makes final selection → Response shown → Main menu returns
+
+## Running Locally
 
 ```bash
-# Open directly
-open index.html
+# Install dependencies
+npm install
 
-# Or serve locally
-npx serve . -p 5174
+# Start dev server
+npm run dev
+
+# Open browser
+open http://localhost:5174
+
+# Run tests
+npm test
 ```
 
-Then open http://localhost:5174
+## Using with a Real Bot
 
-## Testing
+This sample uses a **mock Direct Line** for demonstration. Replace it with a real connection for production use.
 
-```bash
-npm install -D playwright @playwright/test
-npx playwright test
+### Option 1: Direct Line Token
+
+```javascript
+// Replace createMockDirectLine() with:
+var directLine = window.WebChat.createDirectLine({
+  token: 'YOUR_DIRECT_LINE_TOKEN'
+});
+```
+
+Get a token from your bot's Direct Line channel in Azure Portal, or use a token server.
+
+### Option 2: Copilot Studio
+
+For Microsoft Copilot Studio bots, you can:
+- Use the token endpoint from Copilot Studio
+- Or use the [M365 Agents SDK](https://github.com/AhmedBelkadi/M365AgentsSDK-Streaming-WebChat) for streaming support
+
+## Key Concepts
+
+### Recompose Pattern
+
+WebChat's recompose pattern lets you build custom UIs using Basic* components:
+
+```
+Composer (provides WebChat context)
+  └── AccessKeySinkSurface (keyboard navigation)
+        └── BasicToaster (notifications)
+        └── BasicTranscript (message list)
+        └── BasicConnectivityStatus (connection status)
+        └── BasicSendBox (input + suggestions)
+```
+
+See [official WebChat recompose samples](https://github.com/microsoft/BotFramework-WebChat/tree/main/samples/06.recomposing-ui).
+
+### Why Not Just Disable the Input?
+
+Setting `input.disabled = true` causes WebChat to propagate the disabled state to suggestion buttons. This sample avoids that by:
+
+- Using CSS `pointer-events: none` on the input only
+- Blocking keyboard events via JavaScript event listeners
+- Never setting the `disabled` attribute
+
+### Suggested Actions Format
+
+Suggested actions are sent via the `suggestedActions` property on bot activities:
+
+```javascript
+{
+  type: 'message',
+  text: 'Choose an option:',
+  suggestedActions: {
+    actions: [
+      { type: 'imBack', title: 'Option 1', value: 'option1' },
+      { type: 'imBack', title: 'Option 2', value: 'option2' }
+    ]
+  }
+}
 ```
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `index.html` | Complete sample with mock DirectLine and store middleware |
-| `test.spec.js` | Playwright tests |
+| File | Description |
+|------|-------------|
+| `index.html` | Complete sample - single file, no build required |
+| `test.spec.js` | Playwright tests for core functionality |
+| `edge-cases.spec.js` | Playwright tests for edge cases (blur, keyboard blocking) |
 
 ## License
 

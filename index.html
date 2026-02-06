@@ -3,59 +3,71 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebChat - Disable SendBox with Suggestions (Recompose)</title>
+  <title>WebChat - Disable SendBox When Suggestions Are Shown</title>
+
   <style>
+    /*
+     * BASE STYLES
+     * Standard full-height chat container layout
+     */
     * { box-sizing: border-box; }
+
     html, body {
       height: 100%;
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: #f0f2f5;
     }
+
     #root {
       height: 100%;
       max-width: 480px;
       margin: 0 auto;
       box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     }
-    /* WebChat's internal wrappers need height to pass through */
-    #root > div {
-      height: 100%;
-    }
+
+    /* WebChat renders wrapper divs that need explicit height */
+    #root > div,
     #root > div > div {
       height: 100%;
     }
 
-    /* Layout for our recomposed chat */
+    /*
+     * CHAT LAYOUT
+     * Flex column with transcript taking remaining space
+     */
     .chat-layout {
       display: flex;
       flex-direction: column;
       height: 100%;
       background: #fff;
     }
+
     .chat-layout__transcript {
       flex: 1;
       overflow: auto;
+      /* Push messages to bottom when transcript is not full */
       display: flex;
       flex-direction: column;
       justify-content: flex-end;
     }
 
-    /* Our SendBox wrapper - we control this element */
-    .sendbox-wrapper {
-      position: relative;
-    }
-    /* Visual hint when input is disabled */
+    /*
+     * SENDBOX DISABLED STATE
+     * When suggestions are shown, we disable typing but keep suggestions clickable.
+     * We target only the input element, not the entire sendbox (which contains suggestions).
+     */
     .sendbox-wrapper--disabled [data-id="webchat-sendbox-input"] {
       opacity: 0.5;
-      caret-color: transparent;
-      pointer-events: none;
+      caret-color: transparent;  /* Hide text cursor */
+      pointer-events: none;      /* Block mouse clicks on input */
     }
   </style>
 </head>
 <body>
   <div id="root"></div>
 
+  <!-- Dependencies -->
   <script src="https://unpkg.com/rxjs@7/dist/bundles/rxjs.umd.min.js"></script>
   <script crossorigin="anonymous" src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin="anonymous" src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -65,11 +77,19 @@
     (function() {
       'use strict';
 
+      // =============================================================================
+      // WEBCHAT IMPORTS
+      // Using the official recompose pattern with Basic* components
+      // See: https://github.com/microsoft/BotFramework-WebChat/tree/main/samples/06.recomposing-ui
+      // =============================================================================
+
       var React = window.React;
       var ReactDOM = window.ReactDOM;
       var createElement = React.createElement;
+      var useEffect = React.useEffect;
+      var useRef = React.useRef;
 
-      // WebChat exports - following official recompose pattern
+      // WebChat components for recomposing the UI
       var Components = window.WebChat.Components;
       var Composer = Components.Composer;
       var AccessKeySinkSurface = Components.AccessKeySinkSurface;
@@ -77,67 +97,78 @@
       var BasicTranscript = Components.BasicTranscript;
       var BasicConnectivityStatus = Components.BasicConnectivityStatus;
       var BasicSendBox = Components.BasicSendBox;
+
+      // Hook to detect when suggested actions are present
       var useSuggestedActions = window.WebChat.hooks.useSuggestedActions;
-      var useEffect = React.useEffect;
-      var useRef = React.useRef;
 
-      // =====================
-      // MOCK DIRECTLINE
-      // =====================
+
+      // =============================================================================
+      // MOCK DIRECT LINE (FOR DEMO PURPOSES)
+      //
+      // Replace this with a real Direct Line connection for production:
+      //
+      //   var directLine = window.WebChat.createDirectLine({
+      //     token: 'YOUR_DIRECT_LINE_TOKEN'
+      //   });
+      //
+      // Or use the M365 Agents SDK for Copilot Studio bots.
+      // =============================================================================
+
       function createMockDirectLine() {
-        var Subject = rxjs.Subject;
-        var BehaviorSubject = rxjs.BehaviorSubject;
-        var Observable = rxjs.Observable;
+        var activitySubject = new rxjs.Subject();
+        var connectionStatus = new rxjs.BehaviorSubject(0); // 0=uninitialized
+        var messageId = 0;
+        var messageHandlers = [];
 
-        var activitySubject = new Subject();
-        var connectionStatus = new BehaviorSubject(0);
-        var counter = 0;
-        var handlers = [];
-
-        setTimeout(function() { connectionStatus.next(1); }, 50);
-        setTimeout(function() { connectionStatus.next(2); }, 100);
+        // Simulate connection sequence: uninitialized -> connecting -> connected
+        setTimeout(function() { connectionStatus.next(1); }, 50);  // connecting
+        setTimeout(function() { connectionStatus.next(2); }, 100); // connected
 
         return {
+          // Required Direct Line interface
           activity$: activitySubject.asObservable(),
           connectionStatus$: connectionStatus.asObservable(),
           end: function() {},
-          getSessionId: function() {
-            return new Observable(function(obs) {
-              obs.next('session-' + Date.now());
-              obs.complete();
-            });
-          },
+
           postActivity: function(activity) {
-            return new Observable(function(obs) {
-              var id = 'user-' + (++counter);
+            return new rxjs.Observable(function(observer) {
+              var id = 'msg-' + (++messageId);
               setTimeout(function() {
-                handlers.forEach(function(h) { h(activity); });
-                obs.next(id);
-                obs.complete();
+                messageHandlers.forEach(function(handler) { handler(activity); });
+                observer.next(id);
+                observer.complete();
               }, 10);
             });
           },
-          onUserMessage: function(handler) { handlers.push(handler); },
-          sendBotMessage: function(text, suggestions) {
+
+          // Helper methods for the mock (not part of Direct Line interface)
+          onUserMessage: function(handler) {
+            messageHandlers.push(handler);
+          },
+
+          sendBotMessage: function(text, suggestedActions) {
             var activity = {
-              id: 'bot-' + (++counter),
+              id: 'bot-' + (++messageId),
               type: 'message',
               timestamp: new Date().toISOString(),
               from: { id: 'bot', role: 'bot' },
               text: text
             };
-            if (suggestions && suggestions.length) {
+
+            if (suggestedActions && suggestedActions.length) {
               activity.suggestedActions = {
-                actions: suggestions.map(function(s) {
-                  return { type: 'imBack', title: s.title, value: s.value || s.title };
+                actions: suggestedActions.map(function(action) {
+                  return { type: 'imBack', title: action.title, value: action.value };
                 })
               };
             }
+
             activitySubject.next(activity);
           },
-          sendTyping: function() {
+
+          sendTypingIndicator: function() {
             activitySubject.next({
-              id: 'typing-' + (++counter),
+              id: 'typing-' + (++messageId),
               type: 'typing',
               timestamp: new Date().toISOString(),
               from: { id: 'bot', role: 'bot' }
@@ -146,10 +177,13 @@
         };
       }
 
-      // =====================
-      // CONVERSATION FLOW
-      // =====================
-      function setupFlow(dl) {
+
+      // =============================================================================
+      // DEMO CONVERSATION FLOW
+      // Two-level menu navigation to demonstrate suggested actions
+      // =============================================================================
+
+      function setupDemoConversation(directLine) {
         var mainMenu = [
           { title: 'Food', value: 'food' },
           { title: 'Entertainment', value: 'entertainment' },
@@ -157,27 +191,36 @@
         ];
 
         var subMenus = {
-          food: { text: 'What would you like to eat?', options: [
-            { title: 'Pizza', value: 'pizza' },
-            { title: 'Burger', value: 'burger' },
-            { title: 'Sushi', value: 'sushi' },
-            { title: 'Back', value: 'back' }
-          ]},
-          entertainment: { text: 'What kind of entertainment?', options: [
-            { title: 'Movies', value: 'movies' },
-            { title: 'Music', value: 'music' },
-            { title: 'Games', value: 'games' },
-            { title: 'Back', value: 'back' }
-          ]},
-          help: { text: 'What do you need help with?', options: [
-            { title: 'Account', value: 'account' },
-            { title: 'Orders', value: 'orders' },
-            { title: 'Contact', value: 'contact' },
-            { title: 'Back', value: 'back' }
-          ]}
+          food: {
+            text: 'What would you like to eat?',
+            options: [
+              { title: 'Pizza', value: 'pizza' },
+              { title: 'Burger', value: 'burger' },
+              { title: 'Sushi', value: 'sushi' },
+              { title: 'Back', value: 'back' }
+            ]
+          },
+          entertainment: {
+            text: 'What kind of entertainment?',
+            options: [
+              { title: 'Movies', value: 'movies' },
+              { title: 'Music', value: 'music' },
+              { title: 'Games', value: 'games' },
+              { title: 'Back', value: 'back' }
+            ]
+          },
+          help: {
+            text: 'What do you need help with?',
+            options: [
+              { title: 'Account', value: 'account' },
+              { title: 'Orders', value: 'orders' },
+              { title: 'Contact', value: 'contact' },
+              { title: 'Back', value: 'back' }
+            ]
+          }
         };
 
-        var responses = {
+        var finalResponses = {
           pizza: 'Your pizza is on the way! ETA: 30 min.',
           burger: 'Burger order confirmed! ETA: 25 min.',
           sushi: 'Fresh sushi coming up! ETA: 40 min.',
@@ -189,88 +232,110 @@
           contact: 'Support contacted. Response within 24h.'
         };
 
-        dl.onUserMessage(function(activity) {
+        // Handle user messages
+        directLine.onUserMessage(function(activity) {
           if (!activity.text) return;
           var input = activity.text.toLowerCase().trim();
 
           setTimeout(function() {
-            dl.sendTyping();
+            directLine.sendTypingIndicator();
+
             setTimeout(function() {
+              // Navigation: back to main menu
               if (input === 'back') {
-                dl.sendBotMessage('What would you like to do?', mainMenu);
+                directLine.sendBotMessage('What would you like to do?', mainMenu);
                 return;
               }
+
+              // Navigation: sub-menu
               if (subMenus[input]) {
-                dl.sendBotMessage(subMenus[input].text, subMenus[input].options);
+                directLine.sendBotMessage(subMenus[input].text, subMenus[input].options);
                 return;
               }
-              if (responses[input]) {
-                dl.sendBotMessage(responses[input], null);
+
+              // Final response, then return to main menu
+              if (finalResponses[input]) {
+                directLine.sendBotMessage(finalResponses[input], null);
                 setTimeout(function() {
-                  dl.sendBotMessage('Anything else?', mainMenu);
+                  directLine.sendBotMessage('Anything else?', mainMenu);
                 }, 1500);
                 return;
               }
-              dl.sendBotMessage('Here are your options:', mainMenu);
+
+              // Default: show main menu
+              directLine.sendBotMessage('Here are your options:', mainMenu);
             }, 600);
           }, 200);
         });
 
+        // Welcome message (no suggestions - user can type freely)
         setTimeout(function() {
-          dl.sendBotMessage('Hi! Type anything to see the menu.', null);
-        }, 400);
+          directLine.sendBotMessage('Welcome! Type anything to see the menu.', null);
+        }, 500);
       }
 
-      // =====================
+
+      // =============================================================================
       // RECOMPOSED CHAT UI
-      // =====================
-      // Following official pattern: Composer > AccessKeySinkSurface > Basic* components
-      // We wrap BasicSendBox in our own div to control disabled state
+      //
+      // This is the key pattern: we wrap BasicSendBox in our own element so we can
+      // control its disabled state based on whether suggestions are shown.
+      //
+      // Why not just set disabled on the input?
+      // - WebChat propagates disabled state to suggested action buttons
+      // - We want suggestions clickable, only the text input disabled
+      //
+      // Solution:
+      // - Use CSS to visually disable and block pointer events on the input only
+      // - Use JS to block keyboard events (CSS pointer-events doesn't block keyboard)
+      // - Blur the input to remove cursor
+      // =============================================================================
+
       function RecomposedChat() {
-        var result = useSuggestedActions();
-        var suggestedActions = result[0];
+        var suggestedActions = useSuggestedActions()[0];
         var hasSuggestions = suggestedActions && suggestedActions.length > 0;
         var wrapperRef = useRef(null);
 
-        // Block input when suggestions are present (without using disabled which WebChat propagates)
+        // Block keyboard input when suggestions are present
         useEffect(function() {
           if (!wrapperRef.current) return;
+
           var input = wrapperRef.current.querySelector('[data-id="webchat-sendbox-input"]');
           if (!input) return;
 
-          function blockInput(e) {
-            if (hasSuggestions) {
-              e.preventDefault();
-              e.stopPropagation();
-            }
+          function blockKeyboardInput(event) {
+            event.preventDefault();
+            event.stopPropagation();
           }
 
           if (hasSuggestions) {
-            input.addEventListener('keydown', blockInput, true);
-            input.addEventListener('keypress', blockInput, true);
-            input.addEventListener('paste', blockInput, true);
-            // Remove focus so cursor isn't visible
+            // Block all keyboard input
+            input.addEventListener('keydown', blockKeyboardInput, true);
+            input.addEventListener('keypress', blockKeyboardInput, true);
+            input.addEventListener('paste', blockKeyboardInput, true);
+
+            // Remove focus to hide cursor (CSS caret-color is backup)
             if (document.activeElement === input) {
               input.blur();
             }
-            // Clear any existing value when suggestions appear
+
+            // Clear any text that was typed before suggestions appeared
             if (input.value) {
-              // Dispatch input event to sync React state
-              var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-              nativeInputValueSetter.call(input, '');
+              var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+              setter.call(input, '');
               input.dispatchEvent(new Event('input', { bubbles: true }));
             }
           }
 
-          return function() {
-            input.removeEventListener('keydown', blockInput, true);
-            input.removeEventListener('keypress', blockInput, true);
-            input.removeEventListener('paste', blockInput, true);
+          return function cleanup() {
+            input.removeEventListener('keydown', blockKeyboardInput, true);
+            input.removeEventListener('keypress', blockKeyboardInput, true);
+            input.removeEventListener('paste', blockKeyboardInput, true);
           };
         }, [hasSuggestions]);
 
-        var wrapperClass = 'sendbox-wrapper' + (hasSuggestions ? ' sendbox-wrapper--disabled' : '');
-
+        // Render the recomposed UI
+        // Structure follows official WebChat recompose pattern
         return createElement(AccessKeySinkSurface, null,
           createElement('div', { className: 'chat-layout' },
             createElement(BasicToaster, null),
@@ -278,12 +343,11 @@
               createElement(BasicTranscript, null)
             ),
             createElement(BasicConnectivityStatus, null),
-            // Our wrapper around BasicSendBox
             createElement('div', {
               ref: wrapperRef,
-              className: wrapperClass,
+              className: 'sendbox-wrapper' + (hasSuggestions ? ' sendbox-wrapper--disabled' : ''),
               'data-testid': 'sendbox-wrapper',
-              'aria-disabled': hasSuggestions
+              'aria-disabled': hasSuggestions ? 'true' : undefined
             },
               createElement(BasicSendBox, null)
             )
@@ -291,39 +355,45 @@
         );
       }
 
-      // =====================
-      // INIT
-      // =====================
-      var directLine = createMockDirectLine();
-      setupFlow(directLine);
 
+      // =============================================================================
+      // INITIALIZATION
+      // =============================================================================
+
+      // Create Direct Line connection (replace with real connection for production)
+      var directLine = createMockDirectLine();
+      setupDemoConversation(directLine);
+
+      // Style options for WebChat
       var styleOptions = {
+        // Message bubbles
         bubbleBackground: '#e8f4fd',
         bubbleTextColor: '#1a1a1a',
         bubbleBorderRadius: 12,
         bubbleFromUserBackground: '#0078d4',
         bubbleFromUserTextColor: '#ffffff',
         bubbleFromUserBorderRadius: 12,
+
+        // Suggested actions (stacked layout for this demo)
         suggestedActionLayout: 'stacked',
         suggestedActionBackgroundColor: '#0078d4',
         suggestedActionBorderColor: 'transparent',
         suggestedActionBorderRadius: 16,
         suggestedActionTextColor: '#ffffff',
         suggestedActionHeight: 40,
+
+        // Hide upload button for cleaner demo
         hideUploadButton: true
       };
 
+      // Render WebChat
       var root = ReactDOM.createRoot(document.getElementById('root'));
       root.render(
-        createElement(Composer, {
-          directLine: directLine,
-          styleOptions: styleOptions
-        },
+        createElement(Composer, { directLine: directLine, styleOptions: styleOptions },
           createElement(RecomposedChat)
         )
       );
 
-      console.log('WebChat initialized with recomposed UI (official pattern)');
     })();
   </script>
 </body>
