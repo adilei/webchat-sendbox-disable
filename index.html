@@ -239,6 +239,21 @@
           } else {
             webchatEl.classList.remove('sendbox-disabled');
           }
+
+          // Actually disable the input element (CSS alone doesn't block keyboard)
+          // Use setTimeout to ensure WebChat has rendered
+          setTimeout(function() {
+            var input = webchatEl.querySelector('[data-id="webchat-sendbox-input"]');
+            if (input) {
+              input.disabled = disabled;
+              if (disabled) {
+                input.setAttribute('readonly', 'readonly');
+                input.blur();
+              } else {
+                input.removeAttribute('readonly');
+              }
+            }
+          }, 50);
         }
 
         return window.WebChat.createStore({}, function(store) {
