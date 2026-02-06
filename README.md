@@ -107,11 +107,9 @@ open http://localhost:5174
 npm test
 ```
 
-## Using with a Real Bot
+## Using with a Real Agent
 
 This sample uses a **mock Direct Line** for demonstration. Replace it with a real connection for production use.
-
-### Option 1: Direct Line Token
 
 ```javascript
 // Replace createMockDirectLine() with:
@@ -125,13 +123,7 @@ createElement(Composer, { directLine: directLine, styleOptions: styleOptions },
 );
 ```
 
-Get a token from your bot's Direct Line channel in Azure Portal, or use a token server.
-
-### Option 2: Copilot Studio
-
-For Microsoft Copilot Studio bots, you can:
-- Use the token endpoint from Copilot Studio's "Channels" settings
-- Or use the [M365 Agents SDK](https://www.npmjs.com/package/@anthropic/m365-agents-sdk) for streaming support
+For Copilot Studio agents, see [Customize the default canvas](https://learn.microsoft.com/en-us/microsoft-copilot-studio/customize-default-canvas?tabs=webApp) to get your token endpoint.
 
 ## WebChat Recompose Reference
 
